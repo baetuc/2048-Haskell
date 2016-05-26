@@ -8,7 +8,11 @@ type GameMatrix = [GameRow]
 nullCell = [0] -- for the Int Matrix
 winValue = 2048
 startMatrix = [[0,0,0,0], [0,2,0,0],[0,0,0,2], [4,0,0,0]]
-listOfValues = [2,2,2,2,2,2,2,4]
+listOfValues = [2,2,2,2,2,2,2,2,2,4]
+c1 = 4096
+c2 = 10
+c3 = 10
+
 
 ---------------------------------- Utility functions ---------------------------
 
@@ -235,6 +239,57 @@ gameFlow mat = do
                           matrix <- moveMatrixBasedOnUserInput mat
                           newMatrix <- introduceRandom matrix
                           gameFlow newMatrix
+
+
+
+--------------------------------------------------------  Starting the AI ---------------------------------------------------------
+
+--------------------------------------------- Expectimax algorithm --------------------------------------
+
+-- Function that gets the specific function for the move specified by a character
+getMoveForChar :: Char -> GameMatrix -> GameMatrix
+getMoveForChar move
+                | move == 'l' = moveMatrixLeft
+                | move == 'r' = moveMatrixRight
+                | move == 'u' = moveMatrixUp
+                | otherwise = moveMatrixDown
+
+getDifferentMovedMatrix :: GameMatrix -> Char -> [GameMatrix]
+getDifferentMovedMatrix mat move
+                            | (getMoveForChar move) mat == mat = []
+                            | otherwise = [(getMoveForChar move) mat]
+
+-- Function that retrieves all possible matrixes that a user can reach from a move, different from the current matrix
+getPossibleMatrixes :: GameMatrix -> [GameMatrix]
+getPossibleMatrixes mat = getDifferentMovedMatrix mat 'l' ++ getDifferentMovedMatrix mat 'r' ++ getDifferentMovedMatrix mat 'u' ++ getDifferentMovedMatrix mat 'd'
+
+
+------------------------------------------ Heuristic ---------------------------------------------------
+-- Function that calculates smoothness for a single row, i.e. differences between all adjacent cells
+rowSmoothness :: GameRow -> Int
+rowSmoothness (x : []) = 0
+rowSmoothness (x : (y : xs)) = abs (x - y) + rowSmoothness (y : xs)
+
+-- Function that calculates smoothness for all the matrix, i.e smoothness for each row plus smoothness for each column
+-- (which is calculated as smoothness for each row of the turned matrix)
+smoothness :: GameMatrix -> Int
+smoothness mat = sum (map rowSmoothness mat) + sum (map rowSmoothness (rotateRight mat))
+
+-- Function that calculates the score based on the distance from the border
+borderDistanceScore :: (GameMatrix, Int, Int, Int, Int) -> Int
+borderDistanceScore ([], curX, curY, maxX, maxY) = 0
+borderDistanceScore (([] : yss), curX, curY, maxX, maxY) = borderDistanceScore (yss, 0, curY + 1, maxX, maxY)
+borderDistanceScore (((x : xs) : yss), curX, curY, maxX, maxY) = (min curX (maxX - curX) + min curY (maxY - curY)) * x +
+                                                                  borderDistanceScore ((xs : yss), curX + 1, curY, maxX, maxY)
+
+matrixBorderDistanceScore :: GameMatrix -> Int
+matrixBorderDistanceScore mat = borderDistanceScore (mat, 0, 0, length mat - 1, length mat - 1)
+
+-- Calculating the heuristic score of a "leaf" node. It is defined by:
+-- c1 * number of empty spots in the matrix - c2 * sum of modules of differences between all the adjacent cells (smoothness)
+-- - c3 * value of cell * distance to the nearest border, where c1, c2 and c3 are constants, defined in the program header
+heuristic :: GameMatrix -> Int
+heuristic mat = c1 * (countEmptySpotsInMatrix mat) - c2 * (smoothness mat) - c3 * (matrixBorderDistanceScore mat)
 
 
 ------------------------------------------  CREATE THE AI ---------------------------------------

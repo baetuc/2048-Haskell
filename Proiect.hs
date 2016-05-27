@@ -8,10 +8,12 @@ type GameMatrix = [GameRow]
 nullCell = [0] -- for the Int Matrix
 winValue = 2048
 startMatrix = [[0,0,0,0], [0,2,0,0],[0,0,0,2], [4,0,0,0]]
-listOfValues = [2,2,2,2,2,2,2,2,2,4]
-c1 = 4096
-c2 = 10
-c3 = 10
+listOfValues = [2,2,2,2,2,2,2,4]
+c1 = 5000
+c2 = 5
+c3 = 5
+c4 = 0
+treeDepth = 3
 
 
 ---------------------------------- Utility functions ---------------------------
@@ -202,7 +204,8 @@ introduceRandom :: GameMatrix -> IO(GameMatrix)
 introduceRandom mat = do
                         randPos <- generateRandomPosition mat
                         randVal <- generateRandomValue
-                        return $ introduceValueAtPosition mat randPos randVal
+                        if (countEmptySpotsInMatrix mat == 0) then return mat
+                          else return $ introduceValueAtPosition mat randPos randVal
 
 ------------------------------- Take the input from the user -----------------------------------
 
@@ -228,17 +231,17 @@ moveMatrixBasedOnUserInput mat = do
 ----------------------------------- Generate the game flow ----------------------------------------------
 
 -- Function that defines the game flow
-gameFlow :: GameMatrix -> IO()
-gameFlow mat = do
-                if isWon mat then putStrLn "Game is won!! Congratulations!"
-                  else
-                    if not (canContinue mat) then putStrLn "No moves possible. Game is lost!!"
-                      else
-                        do
-                          printMatrix mat
-                          matrix <- moveMatrixBasedOnUserInput mat
-                          newMatrix <- introduceRandom matrix
-                          gameFlow newMatrix
+gameFlow :: GameMatrix -> (GameMatrix -> IO(GameMatrix)) -> IO()
+gameFlow mat inputSource = do
+                            printMatrix mat
+                            if isWon mat then putStrLn "Game is won!! Congratulations!"
+                              else
+                                if not (canContinue mat) then putStrLn "No moves possible. Game is lost!!"
+                                  else
+                                    do
+                                      matrix <- inputSource mat
+                                      newMatrix <- introduceRandom matrix
+                                      gameFlow newMatrix inputSource
 
 
 
@@ -247,22 +250,71 @@ gameFlow mat = do
 --------------------------------------------- Expectimax algorithm --------------------------------------
 
 -- Function that gets the specific function for the move specified by a character
-getMoveForChar :: Char -> GameMatrix -> GameMatrix
+getMoveForChar :: String -> GameMatrix -> GameMatrix
 getMoveForChar move
-                | move == 'l' = moveMatrixLeft
-                | move == 'r' = moveMatrixRight
-                | move == 'u' = moveMatrixUp
+                | move == "l" = moveMatrixLeft
+                | move == "r" = moveMatrixRight
+                | move == "u" = moveMatrixUp
                 | otherwise = moveMatrixDown
 
-getDifferentMovedMatrix :: GameMatrix -> Char -> [GameMatrix]
-getDifferentMovedMatrix mat move
-                            | (getMoveForChar move) mat == mat = []
-                            | otherwise = [(getMoveForChar move) mat]
+-- Function that gets all the possible matrixes that the player could get to by specifying a move,
+-- along with the move needed in order to get to that matrix from the current one
+getDifferentMovedMatrix :: GameMatrix -> String -> [(GameMatrix, String)]
+getDifferentMovedMatrix mat move = [((getMoveForChar move) mat, move)]
+
+-- getDifferentMovedMatrix mat move      -- TO GET ONLY THE MOVES THAT change the state. To be tested
+--                             | (getMoveForChar move) mat == mat = []
+--                             | otherwise = [((getMoveForChar move) mat, move)]
 
 -- Function that retrieves all possible matrixes that a user can reach from a move, different from the current matrix
-getPossibleMatrixes :: GameMatrix -> [GameMatrix]
-getPossibleMatrixes mat = getDifferentMovedMatrix mat 'l' ++ getDifferentMovedMatrix mat 'r' ++ getDifferentMovedMatrix mat 'u' ++ getDifferentMovedMatrix mat 'd'
+getPossibleMatrixes :: GameMatrix -> [(GameMatrix, String)]
+getPossibleMatrixes mat = getDifferentMovedMatrix mat "l" ++ getDifferentMovedMatrix mat "r" ++ getDifferentMovedMatrix mat "u" ++ getDifferentMovedMatrix mat "d"
 
+
+-- Calculating the expectimax for a parent node (a player node)
+parentExpectimax :: GameMatrix -> Int -> Int
+parentExpectimax mat depth
+                      | not (canContinue mat) = -1000000
+                      | depth == 0 = heuristic mat
+                      | otherwise = maximum $ map (childExpectimax (depth - 1)) $ map fst (getPossibleMatrixes mat)
+
+
+-- Function that generates all the pairs (mat, r) from an initial matrix, where mat is a possible matrix to have
+-- after the computer randomly introduces a value in the initial matrix, and r is 1 if the value is 4 and 9  if the value is 2
+generateAllPossibilitiesWithProbability :: GameMatrix -> [(GameMatrix, Int)]
+generateAllPossibilitiesWithProbability mat =
+  [(introduceValueAtPosition mat i val, if val == 2 then 1 else 7) | i <- [0..(countEmptySpotsInMatrix mat - 1)], val <- [2,4]]
+
+-- Calculating the expectimax for a child node (computer node)
+childExpectimax ::  Int -> GameMatrix -> Int
+childExpectimax depth mat
+                    | depth == 0 = heuristic mat
+                    | countEmptySpotsInMatrix mat == 0 = -1000000
+                    | otherwise = sum (map (\(x, y) -> y * parentExpectimax x (depth - 1)) (generateAllPossibilitiesWithProbability mat)) `div` (10 * countEmptySpotsInMatrix mat)
+
+
+-- Function that takes a decision based on current position
+takeDecision :: GameMatrix -> IO(String)
+takeDecision mat = return $ snd $ maximum $ map (\(x,y) -> (parentExpectimax x treeDepth, y)) (getPossibleMatrixes mat)
+
+moveMatrixRandom :: GameMatrix -> IO(GameMatrix)
+moveMatrixRandom mat
+                | moveMatrixLeft mat /= mat = return $ moveMatrixLeft mat
+                | moveMatrixRight mat /= mat = return $ moveMatrixRight mat
+                | moveMatrixDown mat /= mat = return $ moveMatrixDown mat
+                | otherwise = return $ moveMatrixUp mat
+
+-- Function that moves the matrix based on the AI decision (l/r/u/d)
+moveMatrixBasedOnAIDecision :: GameMatrix -> IO(GameMatrix)
+moveMatrixBasedOnAIDecision mat = do
+                                  move <- takeDecision mat
+                                  if(countEmptySpotsInMatrix mat == 0) then moveMatrixRandom mat
+                                    else
+                                      case move of
+                                        "l" -> return $ moveMatrixLeft mat
+                                        "r" -> return $ moveMatrixRight mat
+                                        "u" -> return $ moveMatrixUp mat
+                                        "d" -> return $ moveMatrixDown mat
 
 ------------------------------------------ Heuristic ---------------------------------------------------
 -- Function that calculates smoothness for a single row, i.e. differences between all adjacent cells
@@ -285,14 +337,32 @@ borderDistanceScore (((x : xs) : yss), curX, curY, maxX, maxY) = (min curX (maxX
 matrixBorderDistanceScore :: GameMatrix -> Int
 matrixBorderDistanceScore mat = borderDistanceScore (mat, 0, 0, length mat - 1, length mat - 1)
 
+-- Function that returns the index of element in list, starting from a specifing index
+getIndexOf :: GameRow -> GameCell -> Int -> Int
+getIndexOf (x : xs) element index
+                            | x == element = index
+                            | otherwise = getIndexOf xs element (index - 1)
+
+-- Function that returns 1 if the maximum element is in left cornet, otherwise returns 0
+maxCellInLeftUpperCorner :: GameMatrix -> Int
+maxCellInLeftUpperCorner mat
+                          | getIndexOf (concat mat) (maximum (concat mat)) 0 == 0 = 1
+                          | otherwise = 0
+
 -- Calculating the heuristic score of a "leaf" node. It is defined by:
 -- c1 * number of empty spots in the matrix - c2 * sum of modules of differences between all the adjacent cells (smoothness)
 -- - c3 * value of cell * distance to the nearest border, where c1, c2 and c3 are constants, defined in the program header
 heuristic :: GameMatrix -> Int
-heuristic mat = c1 * (countEmptySpotsInMatrix mat) - c2 * (smoothness mat) - c3 * (matrixBorderDistanceScore mat)
+heuristic mat = c1 * (countEmptySpotsInMatrix mat) - c2 * (smoothness mat) - c3 * (matrixBorderDistanceScore mat) + c4 * (maxCellInLeftUpperCorner mat) * maximum(concat mat)
 
 
 ------------------------------------------  CREATE THE AI ---------------------------------------
 
 main :: IO ()
-main = gameFlow startMatrix
+main = do
+          putStr "Alegeti tipul de joc (A: automat / U : utilizator): "
+          answer <- getLine
+          case answer of
+            "A" -> gameFlow startMatrix moveMatrixBasedOnAIDecision
+            "U" -> gameFlow startMatrix moveMatrixBasedOnUserInput
+            _ -> main

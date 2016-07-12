@@ -1,5 +1,7 @@
 import System.Random
 import Data.List(elemIndices)
+import Data.List(sort)
+import Data.List(group)
 
 -- Synonim for the Int matrix necessary for holding the current state of the game
 type GameCell = Int
@@ -10,10 +12,11 @@ winValue = 2048
 startMatrix = [[0,0,0,0], [0,2,0,0],[0,0,0,2], [4,0,0,0]]
 listOfValues = [2,2,2,2,2,2,2,4]
 c1 = 5000
-c2 = 5
-c3 = 5
-c4 = 0
+c2 = 0
+c3 = 100
+c4 = 100
 treeDepth = 3
+testCases = 30
 
 
 ---------------------------------- Utility functions ---------------------------
@@ -228,22 +231,6 @@ moveMatrixBasedOnUserInput mat = do
                                     "u" -> return $ moveMatrixUp mat
                                     "d" -> return $ moveMatrixDown mat
 
------------------------------------ Generate the game flow ----------------------------------------------
-
--- Function that defines the game flow
-gameFlow :: GameMatrix -> (GameMatrix -> IO(GameMatrix)) -> IO()
-gameFlow mat inputSource = do
-                            printMatrix mat
-                            if isWon mat then putStrLn "Game is won!! Congratulations!"
-                              else
-                                if not (canContinue mat) then putStrLn "No moves possible. Game is lost!!"
-                                  else
-                                    do
-                                      matrix <- inputSource mat
-                                      newMatrix <- introduceRandom matrix
-                                      gameFlow newMatrix inputSource
-
-
 
 --------------------------------------------------------  Starting the AI ---------------------------------------------------------
 
@@ -268,7 +255,7 @@ getDifferentMovedMatrix mat move = [((getMoveForChar move) mat, move)]
 
 -- Function that retrieves all possible matrixes that a user can reach from a move, different from the current matrix
 getPossibleMatrixes :: GameMatrix -> [(GameMatrix, String)]
-getPossibleMatrixes mat = getDifferentMovedMatrix mat "l" ++ getDifferentMovedMatrix mat "r" ++ getDifferentMovedMatrix mat "u" ++ getDifferentMovedMatrix mat "d"
+getPossibleMatrixes mat = getDifferentMovedMatrix mat "l" ++ getDifferentMovedMatrix mat "r" ++ getDifferentMovedMatrix mat "u"
 
 
 -- Calculating the expectimax for a parent node (a player node)
@@ -358,6 +345,21 @@ heuristic mat = c1 * (countEmptySpotsInMatrix mat) - c2 * (smoothness mat) - c3 
 
 ------------------------------------------  CREATE THE AI ---------------------------------------
 
+----------------------------------- Generate the game flow ----------------------------------------------
+
+-- Function that defines the game flow
+gameFlow :: GameMatrix -> (GameMatrix -> IO(GameMatrix)) -> IO()
+gameFlow mat inputSource = do
+                            printMatrix mat
+                            if isWon mat then putStrLn "Game is won!! Congratulations!"
+                              else
+                                if not (canContinue mat) then putStrLn "No moves possible. Game is lost!!"
+                                  else
+                                    do
+                                      matrix <- inputSource mat
+                                      newMatrix <- introduceRandom matrix
+                                      gameFlow newMatrix inputSource
+
 main :: IO ()
 main = do
           putStr "Alegeti tipul de joc (A: automat / U : utilizator): "
@@ -366,3 +368,46 @@ main = do
             "A" -> gameFlow startMatrix moveMatrixBasedOnAIDecision
             "U" -> gameFlow startMatrix moveMatrixBasedOnUserInput
             _ -> main
+
+-------------------------------------- Functions used for statistics ------------------------------------
+
+
+-- Function that returns the maximum tile achieved in a test case
+testCase :: GameMatrix -> IO(Int)
+testCase mat = do
+                if not (canContinue mat) then return $ maximum (concat mat)
+                  else
+                    do
+                      matrix <- moveMatrixBasedOnAIDecision mat
+                      newMatrix <- introduceRandom matrix
+                      testCase newMatrix
+
+-- Function that runs a number of testes and collects all the results
+groupTestCases :: Int -> IO([Int])
+groupTestCases numberOfTestCases
+                              | numberOfTestCases > 1 =
+                                                    do
+                                                      result <- testCase startMatrix
+                                                      otherResults <- groupTestCases (numberOfTestCases - 1)
+                                                      return (result : otherResults)
+                              | otherwise = testCase startMatrix >>= \x -> return [x]
+
+-- Function that returns statistics about all test cases
+getStatistics :: [Int] -> IO([(Int, Int)])
+getStatistics unorderedResults = return $ map (\x -> (x !! 0, length x)) $ group $ sort unorderedResults
+
+-- Function that prints statistics
+showStatistics :: [(Int, Int)] -> Int -> IO()
+showStatistics [] tests = putStr ""
+showStatistics ((x,y) : xs) tests = putStr ("S-a atins valoarea maxima ") >> putStr (show x) >> putStr " in " >>
+                                      putStr (show ((fromIntegral y) * 100 / fromIntegral tests)) >> putStrLn "% dintre teste." >>
+                                      showStatistics xs tests
+
+showFinalResultForTestSuite :: [(Int, Int)] -> Int -> IO()
+showFinalResultForTestSuite xs tests = putStr "Rezultate finale in urma a " >> putStr (show testCases) >> putStr " teste, in cadrul urmatorilor parametri: c1 = " >> putStr (show c1) >>
+                                        putStr ", c2 = " >> putStr (show c2) >> putStr ", c3 = " >> putStr (show c3) >>
+                                        putStr ", c4 = " >> putStr (show c4) >> putStr ", inaltimea = " >> putStr (show treeDepth) >>
+                                        putStrLn ":" >> showStatistics xs tests
+
+runTestsAndShowResults :: IO()
+runTestsAndShowResults = groupTestCases testCases >>= \x -> getStatistics x >>= (\y -> showFinalResultForTestSuite y testCases)
